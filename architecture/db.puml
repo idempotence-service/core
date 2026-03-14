@@ -1,0 +1,62 @@
+@startuml
+title Модель данных idempotency_service
+
+skinparam defaultFontName Monospaced
+skinparam linetype ortho
+skinparam padding 5
+skinparam entityPadding 10
+
+entity "idempotency" {
+  + idempotency_key        : varchar(36) <<UK>> NOT NULL
+  + integration_flow       : varchar(255) <<UK>> NOT NULL
+  + integration_operation  : varchar(255) <<UK>> NOT NULL
+  --
+  headers           : jsonb NOT NULL
+  payload           : jsonb NOT NULL
+  status            : varchar(12) NOT NULL
+  status_description: varchar(255)
+  create_date       : timestamptz
+  update_date       : timestamptz
+}
+
+entity "kafka_event_outbox" {
+  + id                   : bigint <<PK>>
+  --
+  integration_flow       : varchar(255)
+  integration_operation  : varchar(255)
+  status                 : varchar(8) NOT NULL
+  status_description     : varchar(255)
+  result                 : varchar(8) NOT NULL
+  result_description     : varchar(255)
+  create_date            : timestamptz
+  update_date            : timestamptz
+}
+
+note right of idempotency
+Уникальность:
+(integration_flow, integration_operation, idempotency_key)
+
+idempotency_key — уникальный ключ операции,
+генерируется клиентом для защиты
+от дублирования
+integration_flow - название интеграции
+integration_operation - название операции
+payload - тело запроса
+status - RESERVED / COMMITTED / ERROR / WAITING_ASYNC_RESPONSE
+status_description - описание статуса
+create_date - время создания
+update_date - время обновления
+end note
+
+note right of kafka_event_outbox
+result - результат обработки события - SUCCESS / FAIL
+result_description - описание результата обработки события
+integration_flow - название интеграции
+integration_operation - название операции
+status - NEW /  DONE / ERROR
+create_date - время создания
+update_date - время обновления
+end note
+
+
+@enduml

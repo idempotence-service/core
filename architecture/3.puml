@@ -1,0 +1,129 @@
+@startuml
+title Отправка события системе-получателю
+
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+participant "Система-получатель" as Receiver
+
+loop send_request_fixed_delay
+
+    IdemService -> DB : Найти idempotency
+    note right of DB #FFFFFF
+        SELECT *
+        FROM idempotency
+        WHERE status = 'RESERVED'
+        ORDER BY create_date ASC
+        LIMIT 1
+        FOR UPDATE
+    end note
+
+    DB --> IdemService : Результат поиска
+
+    alt #tomato Запись не найдена
+        IdemService -> IdemService : Завершить процесс
+
+    else #yellowgreen Запись найдена
+
+        IdemService -> IdemService : Найти топик для отправки события [reply_in]
+
+        note right of IdemService #FFFFFF
+            Найти route по integration_flow + integration_operation
+            Получить [reply_in]
+        end note
+
+        alt reply_in существует
+
+            IdemService -> Receiver : Отправить событие системе-получателю
+            note right of Receiver #FFFFFF
+                Отправка события в [reply_in]
+                {
+                  "headers": {
+                    "originalIdempotencyKey": "550e8400-e29b-41d4-a716-446655440000",
+                    "integrationFlow": "system1-to-system2",
+                    "integrationOperation": "save-new-value",
+                    [idempotency.headers]
+                  },
+                  "payload": {
+                    [idempotency.payload]
+                  }
+                }
+            end note
+
+            Receiver --> IdemService : Получение ответа
+
+            alt Событие успешно отправлено
+                IdemService -> IdemService : Найти топик получения ответа [reply_out]
+                note right of IdemService #FFFFFF
+                    Найти route по integration_flow + integration_operation
+                    Получить reply_out
+                end note
+
+                alt reply_out существует
+                    IdemService -> DB : Обновить idempotency
+                    note right of DB #FFFFFF
+                        idempotency.status = WAITING_ASYNC_RESPONSE
+                        idempotency.update_date = текущее время [UTC +3:00]
+                    end note
+                    IdemService -> IdemService : Завершить процесс
+
+                else reply_out не существует
+                    IdemService -> DB : Обновить idempotency
+                    note right of DB #FFFFFF
+                        idempotency.status = COMMITTED
+                        idempotency.update_date = текущее время [UTC +3:00]
+                    end note
+                    IdemService -> IdemService : Завершить процесс
+
+                else #tomato Внутренняя ошибка
+                    IdemService -> IdemService : Завершить процесс
+                end
+
+            else #tomato Ошибка отправки
+                alt Временная ошибка отправки
+                    note right of IdemService #FFFFFF
+                        KafkaException
+                        TimeoutException
+                        NetworkException
+                        DisconnectException
+                        LeaderNotAvailableException
+                        RetriableException
+                    end note
+
+                    IdemService -> IdemService : Завершить процесс
+
+                else #tomato Иная ошибка отправки
+                    IdemService -> DB : Обновить idempotency
+                    note right of DB #FFFFFF
+                        idempotency.status = ERROR
+                        idempotency.status_description = "Произошла ошибка при отправке ответа
+                                системе-получателю в топик [reply_in]: [java.exception]"
+                        idempotency.update_date = текущее время [UTC +3:00]
+                    end note
+
+                    IdemService -> IdemService : Завершить процесс
+
+                end
+
+            else #tomato Внутренняя ошибка
+                IdemService -> IdemService : Завершить процесс
+            end
+
+        else #tomato reply_in не существует
+
+            IdemService -> DB : Обновить idempotency
+            note right of DB #FFFFFF
+                idempotency.status = ERROR
+                idempotency.status_description = "Не найден топик отправки события"
+                idempotency.update_date = текущее время [UTC +3:00]
+            end note
+
+            IdemService -> IdemService : Завершить процесс
+
+        else #tomato Внутренняя ошибка
+            IdemService -> IdemService : Завершить процесс
+        end
+
+    end
+
+end
+@enduml

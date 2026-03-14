@@ -1,0 +1,101 @@
+@startuml
+title Получение ответа от системы-получателя
+
+participant "Система-получатель" as Receiver
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+
+Receiver -> IdemService: Отправка Kafka события
+note right of Receiver #FFFFFF
+[receiver.consumer.topic]
+
+{
+  "headers": {
+    "originalIdempotencyKey": "550e8400-e29b-41d4-a716-446655440000"
+    "integrationFlow": "system1-to-system2",
+    "integrationOperation": "save-new-value"
+  },
+  "payload": {
+    "result": "SUCCESS | FAIL",
+    "needResend": true | false,
+    "resultDescription": "any"
+  }
+}
+end note
+
+
+IdemService -> IdemService: Валидация события
+
+alt #tomato Отсутствует header [originalIdempotencyKey] / тело запроса / result == null
+    IdemService -> IdemService: Завершить процесс
+end
+
+IdemService -> DB: Найти idempotency
+note right of DB #FFFFFF
+    SELECT *
+    FROM idempotency
+    WHERE integration_flow = [headers.integration_flow]
+      AND integration_operation = [headers.integration_operation]
+      AND idempotency_key = [headers.originalIdempotencyKey]
+      AND status = WAITING_ASYNC_RESPONSE
+end note
+
+DB --> IdemService: Результат поиска
+
+
+alt #tomato Запись не найдена
+    IdemService -> IdemService: Завершить процесс
+
+
+else #yellowgreen Запись найдена
+
+    alt payload.result == SUCCESS
+
+        IdemService -> DB: Обновить idempotency
+        note right of DB #FFFFFF
+            idempotency.status = COMMITTED
+            idempotency.update_date = текущее время [UTC +3:00]
+        end note
+
+        IdemService -> IdemService: Завершить процесс
+
+
+    else payload.result == FAIL
+
+        alt payload.needResend == true
+
+            IdemService -> DB: Обновить idempotency
+            note right of DB #FFFFFF
+                idempotency.status = RESERVED
+                idempotency.status_description = "Система-получатель запросила повторную
+                    отправку события: [payload.resultDescription]"
+                idempotency.update_date = текущее время [UTC +3:00]
+            end note
+
+            IdemService -> IdemService: Завершить процесс
+
+
+        else payload.needResend == false
+
+            IdemService -> DB: Обновить idempotency
+            note right of DB #FFFFFF
+                idempotency.status = ERROR
+                idempotency.status_description = "Ошибка обработки события системой-получателем:
+                    [payload.resultDescription]"
+                idempotency.update_date = текущее время [UTC +3:00]
+            end note
+
+            IdemService -> IdemService: Завершить процесс
+
+        else #tomato Внутренняя ошибка
+            IdemService -> IdemService: Завершить процесс
+        end
+
+
+    else #tomato Некорректное значение result
+        IdemService -> IdemService: Завершить процесс
+    end
+
+end
+
+@enduml

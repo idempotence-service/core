@@ -1,0 +1,44 @@
+@startuml
+title Очистка обработанных записей
+
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+
+loop cleanup_idempotency_fixed_delay (запускается раз в сутки)
+
+    loop Очистка записей
+
+        IdemService -> DB : Найти idempotency
+        note right of DB #FFFFFF
+            SELECT *
+            FROM idempotency
+            WHERE status = 'COMMITTED'
+            ORDER BY create_date ASC
+            LIMIT 500
+            FOR UPDATE SKIP LOCKED
+        end note
+
+        DB --> IdemService : Результат поиска
+
+        alt #tomato Записи не найдены
+            IdemService -> IdemService : Завершить процесс
+
+        else #yellowgreen Записи найдены
+
+            IdemService -> DB : Удалить idempotency
+            note right of DB #FFFFFF
+                DELETE FROM idempotency
+                WHERE (topic_name, idempotency_key) IN
+                (
+                    [список найденных записей]
+                )
+            end note
+
+        else #tomato Внутренняя ошибка
+            IdemService -> IdemService : Завершить процесс
+        end
+
+    end
+
+end
+@enduml

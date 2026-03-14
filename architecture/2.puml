@@ -1,0 +1,77 @@
+@startuml
+title Отправка ответа системе-отправителю
+
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+participant "Система-отправитель" as Sender
+
+loop send_response_fixed_delay
+
+    IdemService -> DB : Найти kafka_event_outbox
+    note right of DB #FFFFFF
+        SELECT *
+            FROM kafka_event_outbox
+            WHERE status = 'NEW'
+            ORDER BY create_date ASC
+            LIMIT 1
+            FOR UPDATE
+    end note
+    DB --> IdemService : Результат поиска
+
+    alt #tomato Запись не найдена
+        IdemService -> IdemService : Завершить процесс
+    else #yellowgreen Запись найдена
+        IdemService -> IdemService: Найти [request_out] для отправки ответа
+        note right of IdemService #FFFFFF
+            Найти route по integration_flow + integration_operation
+            Получить request_out
+        end note
+
+        alt request_out существует
+            IdemService -> Sender : Отправить ответ системе-отправителю
+            note right of Sender #FFFFFF
+                        Отправка события в [request_out]
+                        {
+                          "headers": {
+                            "uuid": "550e8400-e29b-41d4-a716-446655440000"
+                          },
+                          "payload": {
+                            "result": "SUCCESS",
+                            "resultDescription": "Событие успешно обработано"
+                          }
+                        }
+            end note
+            Sender --> IdemService: Получение ответа
+
+            alt Событие успешно отправлено
+                IdemService -> DB : Обновить kafka_event_outbox
+                note right of DB #FFFFFF
+                    kafka_event_outbox.status = DONE
+                    kafka_event_outbox.update_date = текущее время [UTC +3:00]
+                end note
+                IdemService -> IdemService : Завершить процесс
+            else #tomato Ошибка отправки
+                IdemService -> DB : Обновить kafka_event_outbox
+                note right of DB #FFFFFF
+                    kafka_event_outbox.status = ERROR
+                    kafka_event_outbox.status_description = "Произошла ошибка при отправке ответа в [request_out.topic]: [exception message]"
+                    kafka_event_outbox.update_date = текущее время [UTC +3:00]
+                end note
+                IdemService -> IdemService : Завершить процесс
+            else #tomato Внутренняя ошибка
+                IdemService -> IdemService : Завершить процесс
+            end
+        else #tomato request_out не существует
+            IdemService -> DB : Обновить kafka_event_outbox
+            note right of DB #FFFFFF
+                kafka_event_outbox.status = ERROR
+                kafka_event_outbox.status_description = "Не найден топик для отправки ответа"
+                kafka_event_outbox.update_date = текущее время [UTC +3:00]
+            end note
+            IdemService -> IdemService : Завершить процесс
+        else #tomato Внутренняя ошибка
+            IdemService -> IdemService : Завершить процесс
+        end
+    end
+end
+@enduml
