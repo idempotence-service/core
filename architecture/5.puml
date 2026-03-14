@@ -1,6 +1,8 @@
 @startuml
 title Очистка обработанных записей
 
+autonumber
+
 participant "idempotency_service" as IdemService
 database "База данных" as DB
 

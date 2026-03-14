@@ -1,6 +1,8 @@
 @startuml
 title Отправка ответа системе-отправителю
 
+autonumber
+
 participant "idempotency_service" as IdemService
 database "База данных" as DB
 participant "Система-отправитель" as Sender

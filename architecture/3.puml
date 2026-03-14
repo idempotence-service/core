@@ -1,6 +1,8 @@
 @startuml
 title Отправка события системе-получателю
 
+autonumber
+
 participant "idempotency_service" as IdemService
 database "База данных" as DB
 participant "Система-получатель" as Receiver

@@ -1,6 +1,8 @@
 @startuml
 title Получение события от системы-отправителя
 
+autonumber
+
 participant "Система-отправитель" as Sender
 participant "idempotency_service" as IdemService
 database "База данных" as DB
@@ -38,7 +40,26 @@ note right of DB #FFFFFF
 end note
 DB --> IdemService: Результат поиска
 
+IdemService -> IdemService: Найти связанный топик ответа системе-отправителю\n [request_out] по [integration_flow] и [integration_operation]
+note right of IdemService #FFFFFF
+    Аналитическая переменная (в памяти сервиса): [request_out]
+end note
+
 alt #tomato Запись найдена
+
+    alt #tomato request_out существует
+            IdemService -> DB: Создать kafka_event_outbox
+            note right of DB #FFFFFF
+               kafka_event_outbox.result = SUCCESS
+               kafka_event_outbox.result_description = «Событие успешно получено»
+               kafka_event_outbox.integration_flow = [integration_flow] из памяти сервиса
+               kafka_event_outbox.integration_operation = [integration_operation] из памяти сервиса
+               kafka_event_outbox.status = NEW
+               kafka_event_outbox.create_date = текущее время [UTC +3:00]
+               kafka_event_outbox.update_date = текущее время [UTC +3:00]
+            end note
+        end
+
     IdemService -> DB: Создать kafka_event_outbox
     note right of DB #FFFFFF
        kafka_event_outbox.result = FAIL
@@ -50,7 +71,7 @@ alt #tomato Запись найдена
        kafka_event_outbox.update_date = текущее время [UTC +3:00]
     end note
 else #yellowgreen Запись не найдена
-    IdemService -> IdemService: Найти связанный топик ответа системе-отправителю\n [request_out] по [integration_flow] и [integration_operation]
+
     alt #yellowgreen request_out существует
         IdemService -> DB: Создать kafka_event_outbox
         note right of DB #FFFFFF
@@ -74,7 +95,7 @@ else #yellowgreen Запись не найдена
        idempotency.create_date = текущее время [UTC +3:00]
        idempotency.update_date = текущее время [UTC +3:00]
        idempotency.payload = [payload] из запроса
-       idempotency.headers = [headers] из запроса
+       idempotency.headers = [headers] из запроса кроме "idempotencyKey"
     end note
     IdemService -> IdemService: Завершить процесс
 end
