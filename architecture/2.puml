@@ -20,7 +20,7 @@ loop send_response_fixed_delay
     end note
     DB --> IdemService : Результат поиска
 
-    alt #tomato Запись не найдена
+    alt #yellowgreen Запись не найдена
         IdemService -> IdemService : Завершить процесс
     else #yellowgreen Запись найдена
         IdemService -> IdemService: Найти [request_out] для отправки ответа
@@ -60,8 +60,6 @@ loop send_response_fixed_delay
                     kafka_event_outbox.update_date = текущее время [UTC +3:00]
                 end note
                 IdemService -> IdemService : Завершить процесс
-            else #tomato Внутренняя ошибка
-                IdemService -> IdemService : Завершить процесс
             end
         else #tomato request_out не существует
             IdemService -> DB : Обновить kafka_event_outbox
@@ -71,9 +69,17 @@ loop send_response_fixed_delay
                 kafka_event_outbox.update_date = текущее время [UTC +3:00]
             end note
             IdemService -> IdemService : Завершить процесс
-        else #tomato Внутренняя ошибка
-            IdemService -> IdemService : Завершить процесс
-        end
     end
+else #tomato Внутренняя ошибка
+    alt Ошибка БД
+        IdemService -> IdemService : Завершить процесс
+    end
+    IdemService -> DB : Обновить kafka_event_outbox
+    note right of DB #FFFFFF
+        kafka_event_outbox.status = ERROR
+        kafka_event_outbox.status_description = "Внутренняя ошибка: [java.exception]"
+        kafka_event_outbox.update_date = текущее время [UTC +3:00]
+    end note
+    IdemService -> IdemService : Завершить процесс
 end
 @enduml

@@ -54,6 +54,7 @@ result_description - описание результата обработки с
 integration_flow - название интеграции
 integration_operation - название операции
 status - NEW /  DONE / ERROR
+status_description - описание статуса
 create_date - время создания
 update_date - время обновления
 end note

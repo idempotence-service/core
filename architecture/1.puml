@@ -46,32 +46,21 @@ note right of IdemService #FFFFFF
 end note
 
 alt #tomato Запись найдена
-
     alt #tomato request_out существует
-            IdemService -> DB: Создать kafka_event_outbox
-            note right of DB #FFFFFF
-               kafka_event_outbox.result = SUCCESS
-               kafka_event_outbox.result_description = «Событие успешно получено»
-               kafka_event_outbox.integration_flow = [integration_flow] из памяти сервиса
-               kafka_event_outbox.integration_operation = [integration_operation] из памяти сервиса
-               kafka_event_outbox.status = NEW
-               kafka_event_outbox.create_date = текущее время [UTC +3:00]
-               kafka_event_outbox.update_date = текущее время [UTC +3:00]
-            end note
-        end
-
-    IdemService -> DB: Создать kafka_event_outbox
-    note right of DB #FFFFFF
-       kafka_event_outbox.result = FAIL
-       kafka_event_outbox.result_description = «Событие не прошло проверку на идемпотентность»
-       kafka_event_outbox.integration_flow = [integration_flow] из памяти сервиса
-       kafka_event_outbox.integration_operation = [integration_operation] из памяти сервиса
-       kafka_event_outbox.status = NEW
-       kafka_event_outbox.create_date = текущее время [UTC +3:00]
-       kafka_event_outbox.update_date = текущее время [UTC +3:00]
-    end note
+       IdemService -> DB: Создать kafka_event_outbox
+       note right of DB #FFFFFF
+          kafka_event_outbox.result = FAIL
+          kafka_event_outbox.result_description = «Событие не прошло проверку на идемпотентность»
+          kafka_event_outbox.integration_flow = [integration_flow] из памяти сервиса
+          kafka_event_outbox.integration_operation = [integration_operation] из памяти сервиса
+          kafka_event_outbox.status = NEW
+          kafka_event_outbox.status_description = null
+          kafka_event_outbox.create_date = текущее время [UTC +3:00]
+          kafka_event_outbox.update_date = текущее время [UTC +3:00]
+       end note
+    end
+    IdemService -> IdemService: Завершить процесс
 else #yellowgreen Запись не найдена
-
     alt #yellowgreen request_out существует
         IdemService -> DB: Создать kafka_event_outbox
         note right of DB #FFFFFF
@@ -80,6 +69,7 @@ else #yellowgreen Запись не найдена
            kafka_event_outbox.integration_flow = [integration_flow] из памяти сервиса
            kafka_event_outbox.integration_operation = [integration_operation] из памяти сервиса
            kafka_event_outbox.status = NEW
+           kafka_event_outbox.status_description = null
            kafka_event_outbox.create_date = текущее время [UTC +3:00]
            kafka_event_outbox.update_date = текущее время [UTC +3:00]
         end note
@@ -98,6 +88,24 @@ else #yellowgreen Запись не найдена
        idempotency.headers = [headers] из запроса кроме "idempotencyKey"
     end note
     IdemService -> IdemService: Завершить процесс
+else #tomato Внутренняя ошибка
+    alt Ошибка БД
+        IdemService -> IdemService : Завершить процесс
+        alt #tomato request_out существует
+            IdemService -> DB : Создать kafka_event_outbox
+            note right of DB #FFFFFF
+                kafka_event_outbox.result = FAIL
+                kafka_event_outbox.result_description = «Внутренняя ошибка: [java.exception]»
+                kafka_event_outbox.integration_flow = [integration_flow] из памяти сервиса
+                kafka_event_outbox.integration_operation = [integration_operation] из памяти сервиса
+                kafka_event_outbox.status = NEW
+                kafka_event_outbox.status_description = null
+                kafka_event_outbox.create_date = текущее время [UTC +3:00]
+                kafka_event_outbox.update_date = текущее время [UTC +3:00]
+            end note
+        end
+        IdemService -> IdemService : Завершить процесс
+    end
 end
 
 @enduml

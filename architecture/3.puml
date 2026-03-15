@@ -21,7 +21,7 @@ loop send_request_fixed_delay
 
     DB --> IdemService : Результат поиска
 
-    alt #tomato Запись не найдена
+    alt #yellowgreen Запись не найдена
         IdemService -> IdemService : Завершить процесс
 
     else #yellowgreen Запись найдена
@@ -75,11 +75,6 @@ loop send_request_fixed_delay
                         idempotency.update_date = текущее время [UTC +3:00]
                     end note
                     IdemService -> IdemService : Завершить процесс
-
-                else #tomato Внутренняя ошибка
-                    IdemService -> IdemService : Завершить процесс
-                end
-
             else #tomato Ошибка отправки
                 alt Временная ошибка отправки
                     note right of IdemService #FFFFFF
@@ -101,13 +96,8 @@ loop send_request_fixed_delay
                                 системе-получателю в топик [reply_in]: [java.exception]"
                         idempotency.update_date = текущее время [UTC +3:00]
                     end note
-
                     IdemService -> IdemService : Завершить процесс
-
                 end
-
-            else #tomato Внутренняя ошибка
-                IdemService -> IdemService : Завершить процесс
             end
 
         else #tomato reply_in не существует
@@ -120,12 +110,19 @@ loop send_request_fixed_delay
             end note
 
             IdemService -> IdemService : Завершить процесс
-
-        else #tomato Внутренняя ошибка
-            IdemService -> IdemService : Завершить процесс
         end
-
     end
-
+else #tomato Внутренняя ошибка
+    alt Ошибка БД
+        IdemService -> IdemService : Завершить процесс
+    else
+        IdemService -> DB : Обновить idempotency
+        note right of DB #FFFFFF
+            idempotency.status = ERROR
+            idempotency.status_description = "Внутренняя ошибка: [java.exception.message]"
+            idempotency.update_date = текущее время [UTC +3:00]
+        end note
+        IdemService -> IdemService : Завершить процесс
+    end
 end
 @enduml

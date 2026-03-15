@@ -45,27 +45,18 @@ end note
 DB --> IdemService: Результат поиска
 
 
-alt #tomato Запись не найдена
+alt #yellowgreen Запись не найдена
     IdemService -> IdemService: Завершить процесс
-
-
 else #yellowgreen Запись найдена
-
     alt payload.result == SUCCESS
-
         IdemService -> DB: Обновить idempotency
         note right of DB #FFFFFF
             idempotency.status = COMMITTED
             idempotency.update_date = текущее время [UTC +3:00]
         end note
-
         IdemService -> IdemService: Завершить процесс
-
-
     else payload.result == FAIL
-
         alt payload.needResend == true
-
             IdemService -> DB: Обновить idempotency
             note right of DB #FFFFFF
                 idempotency.status = RESERVED
@@ -73,12 +64,8 @@ else #yellowgreen Запись найдена
                     отправку события: [payload.resultDescription]"
                 idempotency.update_date = текущее время [UTC +3:00]
             end note
-
             IdemService -> IdemService: Завершить процесс
-
-
-        else payload.needResend == false
-
+        else #tomato payload.needResend == false
             IdemService -> DB: Обновить idempotency
             note right of DB #FFFFFF
                 idempotency.status = ERROR
@@ -86,18 +73,20 @@ else #yellowgreen Запись найдена
                     [payload.resultDescription]"
                 idempotency.update_date = текущее время [UTC +3:00]
             end note
-
-            IdemService -> IdemService: Завершить процесс
-
-        else #tomato Внутренняя ошибка
             IdemService -> IdemService: Завершить процесс
         end
-
-
-    else #tomato Некорректное значение result
-        IdemService -> IdemService: Завершить процесс
     end
-
+else #tomato Внутренняя ошибка
+    alt Ошибка БД
+        IdemService -> IdemService : Завершить процесс
+    end
+    IdemService -> DB : Обновить idempotency
+    note right of DB #FFFFFF
+        idempotency.status = ERROR
+        idempotency.status_description = "Внутренняя ошибка: [java.exception.message]"
+        idempotency.update_date = текущее время [UTC +3:00]
+    end note
+    IdemService -> IdemService : Завершить процесс
 end
 
 @enduml

@@ -33,7 +33,7 @@ alt #tomato Ошибка валидации запроса
 end
 
 alt #tomato Отсутствует Authorization header
-    IdemService -> UI: 401 Unauthorized
+    IdemService -> UI: 200 OK
     note right of UI #FFFFFF
     {
         "success": false,
@@ -147,6 +147,20 @@ else #yellowgreen Записи найдены
     end note
 
     IdemService -> IdemService: Завершить процесс
+else #tomato Внутренняя ошибка
+    IdemService -> UI: 500 Internal Server Error
+        note right of UI #FFFFFF
+        {
+            "success": false,
+            "data": null,
+            "error": {
+                "title": "Техническая ошибка",
+                "code": [error.code],
+                "text": [java.exception]
+            }
+        }
+        end note
+        IdemService -> IdemService: Завершить процесс
 end
 
 @enduml
