@@ -54,10 +54,7 @@ SELECT
     idempotency_key,
     integration_flow,
     integration_operation,
-    status,
-    status_description,
-    create_date,
-    update_date
+    status
 FROM idempotency
 WHERE status = 'ERROR'
 ORDER BY create_date [ASC | DESC] из запроса
@@ -110,12 +107,9 @@ else #yellowgreen Записи найдены
       "content": [
         {
             "status": "ERROR",
-            "statusDescription": "Ошибка отправки события: [java.exception]",
             "idempotencyKey": "550e8400-e29b-41d4-a716-446655440000",
             "integrationFlow": "system1-to-system2",
-            "integrationOperation": "save-new-tasks",
-            "createDate": "2022-02-15T18:35:24.00Z",
-            "updateDate": "2022-02-15T18:35:24.00Z"
+            "integrationOperation": "save-new-tasks"
         }
       ]
       "pageable": {
