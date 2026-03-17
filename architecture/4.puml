@@ -9,13 +9,11 @@ database "База данных" as DB
 
 Receiver -> IdemService: Отправка Kafka события
 note right of Receiver #FFFFFF
-[receiver.consumer.topic]
+[reply_out]
 
 {
   "headers": {
-    "originalIdempotencyKey": "550e8400-e29b-41d4-a716-446655440000"
-    "integrationFlow": "system1-to-system2",
-    "integrationOperation": "save-new-value"
+    "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000"
   },
   "payload": {
     "result": "SUCCESS | FAIL",
@@ -28,28 +26,38 @@ end note
 
 IdemService -> IdemService: Валидация события
 
-alt #tomato Отсутствует header [originalIdempotencyKey] / тело запроса / result == null
+alt #tomato Отсутствует header [globalKey] / тело запроса / result == null
+    IdemService -> DB: EventAuditRepository.save(invalidReplyAudit)
+    note right of DB #FFFFFF
+        event_audit.reason = "Некорректный ответ от системы-получателя"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
     IdemService -> IdemService: Завершить процесс
 end
 
-IdemService -> DB: Найти idempotency
+IdemService -> DB: IdempotencyRepository.findWaitingAsyncResponseByGlobalKey(globalKey)
 note right of DB #FFFFFF
-    SELECT *
-    FROM idempotency
-    WHERE integration_flow = [headers.integration_flow]
-      AND integration_operation = [headers.integration_operation]
-      AND idempotency_key = [headers.originalIdempotencyKey]
-      AND status = WAITING_ASYNC_RESPONSE
+    Поиск записи idempotency по global_key
+    со status = WAITING_ASYNC_RESPONSE
 end note
 
 DB --> IdemService: Результат поиска
 
 
 alt #yellowgreen Запись не найдена
+    IdemService -> DB: EventAuditRepository.save(orphanReplyAudit)
+    note right of DB #FFFFFF
+        event_audit.reason = "Получен ответ без ожидающей операции"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
     IdemService -> IdemService: Завершить процесс
 else #yellowgreen Запись найдена
     alt payload.result == SUCCESS
-        IdemService -> DB: Обновить idempotency
+        IdemService -> DB: IdempotencyRepository.markCommitted(operation)
         note right of DB #FFFFFF
             idempotency.status = COMMITTED
             idempotency.update_date = текущее время [UTC +3:00]
@@ -57,35 +65,24 @@ else #yellowgreen Запись найдена
         IdemService -> IdemService: Завершить процесс
     else payload.result == FAIL
         alt payload.needResend == true
-            IdemService -> DB: Обновить idempotency
+            IdemService -> DB: IdempotencyRepository.markReserved(operation)
             note right of DB #FFFFFF
                 idempotency.status = RESERVED
-                idempotency.status_description = "Система-получатель запросила повторную
-                    отправку события: [payload.resultDescription]"
+                idempotency.status_description = "Система-получатель запросила повторную отправку события: [payload.resultDescription]"
                 idempotency.update_date = текущее время [UTC +3:00]
             end note
             IdemService -> IdemService: Завершить процесс
         else #tomato payload.needResend == false
-            IdemService -> DB: Обновить idempotency
+            IdemService -> DB: IdempotencyRepository.markError(operation)
             note right of DB #FFFFFF
                 idempotency.status = ERROR
-                idempotency.status_description = "Ошибка обработки события системой-получателем:
-                    [payload.resultDescription]"
+                idempotency.status_description = "Ошибка обработки события системой-получателем: [payload.resultDescription]"
                 idempotency.update_date = текущее время [UTC +3:00]
             end note
             IdemService -> IdemService: Завершить процесс
         end
     end
 else #tomato Внутренняя ошибка
-    alt Ошибка БД
-        IdemService -> IdemService : Завершить процесс
-    end
-    IdemService -> DB : Обновить idempotency
-    note right of DB #FFFFFF
-        idempotency.status = ERROR
-        idempotency.status_description = "Внутренняя ошибка: [java.exception.message]"
-        idempotency.update_date = текущее время [UTC +3:00]
-    end note
     IdemService -> IdemService : Завершить процесс
 end
 

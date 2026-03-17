@@ -48,17 +48,10 @@ alt #tomato Отсутствует Authorization header
     IdemService -> IdemService: Завершить процесс
 end
 
-IdemService -> DB: Найти idempotency
+IdemService -> DB: IdempotencyRepository.findErrorEvents(pageRequest)
 note right of DB #FFFFFF
-SELECT
-    idempotency_key,
-    integration_flow,
-    integration_operation,
-    status
-FROM idempotency
-WHERE status = 'ERROR'
-ORDER BY create_date [ASC | DESC] из запроса
-LIMIT [limit] из запроса
+    Получить записи idempotency со status = ERROR
+    с пагинацией и сортировкой по create_date
 end note
 
 DB --> IdemService: Результат поиска
@@ -68,7 +61,7 @@ alt #yellowgreen Записи не найдены
     IdemService -> UI: 200 OK. Вернуть пустой список
     note right of UI #FFFFFF
     {
-    "content": []
+    "content": [],
     "pageable": {
         "sort": {
           "sorted": false,
@@ -107,11 +100,11 @@ else #yellowgreen Записи найдены
       "content": [
         {
             "status": "ERROR",
-            "idempotencyKey": "550e8400-e29b-41d4-a716-446655440000",
-            "integrationFlow": "system1-to-system2",
-            "integrationOperation": "save-new-tasks"
+            "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000",
+            "service": "sender-service",
+            "integration": "system1-to-system2"
         }
-      ]
+      ],
       "pageable": {
         "sort": {
           "sorted": false,
