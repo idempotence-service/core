@@ -1,0 +1,38 @@
+@startuml
+title Очистка обработанных записей
+
+autonumber
+
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+
+loop cleanup_idempotency_fixed_delay (запускается раз в сутки)
+
+    loop Очистка записей, пока не кончатся
+
+        IdemService -> DB : IdempotencyRepository.findCommittedBatchForCleanup(500)
+        note right of DB #FFFFFF
+            Получить до 500 записей idempotency
+            со status = COMMITTED
+            старше retention policy
+        end note
+
+        DB --> IdemService : Результат поиска
+
+        alt #yellowgreen Записи не найдены
+            IdemService -> IdemService : Завершить процесс
+
+        else #yellowgreen Записи найдены
+            IdemService -> DB : IdempotencyRepository.deleteAllInBatch(records)
+            note right of DB #FFFFFF
+                Удалить найденные записи idempotency
+                по [global_key] порцией до 500 элементов
+            end note
+        end
+        break #tomato Внутренняя ошибка
+            IdemService -> IdemService : Завершить процесс
+        end
+    end
+
+end
+@enduml

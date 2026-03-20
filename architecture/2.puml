@@ -1,0 +1,72 @@
+@startuml
+title Отправка ответа системе-отправителю
+
+autonumber
+
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+participant "Система-отправитель" as Sender
+
+loop send_response_fixed_delay
+
+    IdemService -> DB : KafkaEventOutboxRepository.lockNextNewEvent()
+    note right of DB #FFFFFF
+        Получить первую запись kafka_event_outbox
+        со status = NEW
+    end note
+    DB --> IdemService : Результат поиска
+
+    alt #yellowgreen Запись не найдена
+        IdemService -> IdemService : Завершить процесс
+    else #yellowgreen Запись найдена
+        IdemService -> IdemService: Взять [request_out] из kafka_event_outbox.yaml_snapshot
+        note right of IdemService #FFFFFF
+            request_out = [kafka_event_outbox.yaml_snapshot.request_out]
+        end note
+
+        alt request_out существует
+            IdemService -> Sender : Отправить ответ системе-отправителю
+            note right of Sender #FFFFFF
+                        Отправка события в [request_out]
+                        {
+                          "headers": {
+                            "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000"
+                          },
+                          "payload": {
+                            "result": "[kafka_event_outbox.result]",
+                            "resultDescription": "[kafka_event_outbox.result_description]"
+                          }
+                        }
+            end note
+            Sender --> IdemService: Получение ответа
+
+            alt Событие успешно отправлено
+                IdemService -> DB : KafkaEventOutboxRepository.markDone(outbox)
+                note right of DB #FFFFFF
+                    kafka_event_outbox.status = DONE
+                    kafka_event_outbox.update_date = текущее время [UTC +3:00]
+                end note
+                IdemService -> IdemService : Завершить процесс
+            else #tomato Ошибка отправки
+                IdemService -> DB : KafkaEventOutboxRepository.markError(outbox)
+                note right of DB #FFFFFF
+                    kafka_event_outbox.status = ERROR
+                    kafka_event_outbox.status_description = "Произошла ошибка при отправке ответа в [request_out]: [exception message]"
+                    kafka_event_outbox.update_date = текущее время [UTC +3:00]
+                end note
+                IdemService -> IdemService : Завершить процесс
+            end
+        else #tomato request_out не существует
+            IdemService -> DB : KafkaEventOutboxRepository.markError(outbox)
+            note right of DB #FFFFFF
+                kafka_event_outbox.status = ERROR
+                kafka_event_outbox.status_description = "Не найден канал request_out в сохранённом yaml_snapshot"
+                kafka_event_outbox.update_date = текущее время [UTC +3:00]
+            end note
+            IdemService -> IdemService : Завершить процесс
+        end
+    else #tomato Внутренняя ошибка
+        IdemService -> IdemService : Завершить процесс
+    end
+end
+@enduml

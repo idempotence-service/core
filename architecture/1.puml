@@ -1,0 +1,157 @@
+@startuml
+title Получение события от системы-отправителя
+
+autonumber
+
+participant "Система-отправитель" as Sender
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+
+Sender -> IdemService: Отправка Kafka события
+note right of Sender #FFFFFF
+[inbound]
+{
+  "headers": {
+    "uid": "550e8400-e29b-41d4-a716-446655440000",
+    // any
+  },
+  "payload": {
+    // any
+  }
+}
+end note
+
+IdemService -> IdemService: Валидация события
+
+alt #tomato Отсутствует тело запроса / header [uid]
+    IdemService -> DB: EventAuditRepository.save(invalidEventAudit)
+    note right of DB #FFFFFF
+        event_audit.reason = "Некорректное входящее событие"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.yaml_snapshot = null
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
+    IdemService -> IdemService: Завершить процесс
+end
+
+IdemService -> IdemService: Загрузка маршрута из YAML
+note right of IdemService #FFFFFF
+routeSnapshot = {
+  "service": "sender-service",
+  "integration": "system1-to-system2",
+  "inbound": "sender.events.inbound",
+  "request_out": "sender.events.request_out",
+  "reply_in": "receiver.events.reply_in",
+  "reply_out": "receiver.events.reply_out"
+}
+end note
+
+alt #tomato Маршрут не найден
+    IdemService -> DB: EventAuditRepository.save(invalidEventAudit)
+    note right of DB #FFFFFF
+        event_audit.reason = "Не найден маршрут для входящего события"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.yaml_snapshot = null
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
+    IdemService -> IdemService: Завершить процесс
+end
+
+IdemService -> IdemService: Сформировать global_key = service + integration + uid
+note right of IdemService #FFFFFF
+    global_key = [routeSnapshot.service] + ":" +
+                 [routeSnapshot.integration] + ":" +
+                 [headers.uid]
+end note
+
+IdemService -> DB: IdempotencyRepository.findByGlobalKey(global_key)
+note right of DB #FFFFFF
+    Поиск записи idempotency по global_key
+end note
+DB --> IdemService: Результат поиска
+
+IdemService -> IdemService: Взять [request_out] из routeSnapshot
+note right of IdemService #FFFFFF
+    request_out = [routeSnapshot.request_out]
+end note
+
+alt #tomato Запись найдена
+    alt #tomato request_out существует в yaml_snapshot
+       IdemService -> DB: KafkaEventOutboxRepository.save(duplicateResponse)
+       note right of DB #FFFFFF
+          kafka_event_outbox.global_key = [global_key]
+          kafka_event_outbox.result = FAIL
+          kafka_event_outbox.result_description = "Событие не прошло проверку на идемпотентность"
+          kafka_event_outbox.service_name = [routeSnapshot.service]
+          kafka_event_outbox.integration_name = [routeSnapshot.integration]
+          kafka_event_outbox.yaml_snapshot = [routeSnapshot]
+          kafka_event_outbox.status = NEW
+          kafka_event_outbox.status_description = null
+          kafka_event_outbox.create_date = текущее время [UTC +3:00]
+          kafka_event_outbox.update_date = текущее время [UTC +3:00]
+       end note
+    end
+    IdemService -> DB: EventAuditRepository.save(idempotencyCheckFailedAudit)
+    note right of DB #FFFFFF
+        event_audit.global_key = [global_key]
+        event_audit.service_name = [routeSnapshot.service]
+        event_audit.integration_name = [routeSnapshot.integration]
+        event_audit.reason = "Событие не прошло проверку на идемпотентность"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.yaml_snapshot = [routeSnapshot]
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
+    IdemService -> IdemService: Завершить процесс
+else #yellowgreen Запись не найдена
+    alt #yellowgreen request_out существует в yaml_snapshot
+        IdemService -> DB: KafkaEventOutboxRepository.save(successResponse)
+        note right of DB #FFFFFF
+           kafka_event_outbox.global_key = [global_key]
+           kafka_event_outbox.result = SUCCESS
+           kafka_event_outbox.result_description = "Событие успешно получено"
+           kafka_event_outbox.service_name = [routeSnapshot.service]
+           kafka_event_outbox.integration_name = [routeSnapshot.integration]
+           kafka_event_outbox.yaml_snapshot = [routeSnapshot]
+           kafka_event_outbox.status = NEW
+           kafka_event_outbox.status_description = null
+           kafka_event_outbox.create_date = текущее время [UTC +3:00]
+           kafka_event_outbox.update_date = текущее время [UTC +3:00]
+        end note
+    end
+
+    IdemService -> DB: IdempotencyRepository.save(newOperation)
+    note right of DB #FFFFFF
+       idempotency.global_key = [global_key]
+       idempotency.source_uid = [headers.uid] из запроса
+       idempotency.service_name = [routeSnapshot.service]
+       idempotency.integration_name = [routeSnapshot.integration]
+       idempotency.status = RESERVED
+       idempotency.status_description = null
+       idempotency.create_date = текущее время [UTC +3:00]
+       idempotency.update_date = текущее время [UTC +3:00]
+       idempotency.payload = [payload] из запроса
+       idempotency.headers = [headers] из запроса кроме "uid"
+       idempotency.yaml_snapshot = [routeSnapshot]
+    end note
+    IdemService -> DB: EventAuditRepository.save(idempotencyCheckPassedAudit)
+    note right of DB #FFFFFF
+        event_audit.global_key = [global_key]
+        event_audit.service_name = [routeSnapshot.service]
+        event_audit.integration_name = [routeSnapshot.integration]
+        event_audit.reason = "Событие успешно прошло проверку на идемпотентность"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.yaml_snapshot = [routeSnapshot]
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
+    IdemService -> IdemService: Завершить процесс
+else #tomato Внутренняя ошибка
+    alt Ошибка Hibernate / БД
+        IdemService -> IdemService: Завершить процесс
+    end
+end
+
+@enduml
