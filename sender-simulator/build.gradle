@@ -1,0 +1,3 @@
+bootJar {
+    archiveFileName = 'sender-simulator.jar'
+}

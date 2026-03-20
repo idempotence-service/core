@@ -1,0 +1,3 @@
+bootJar {
+    archiveFileName = 'receiver-simulator.jar'
+}

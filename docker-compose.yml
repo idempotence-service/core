@@ -1,0 +1,126 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: idempotency-postgres
+    environment:
+      POSTGRES_DB: idempotency
+      POSTGRES_USER: idempotency
+      POSTGRES_PASSWORD: idempotency
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U idempotency -d idempotency"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redpanda-sender:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.10
+    container_name: redpanda-sender
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --check=false
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda-sender:9092
+    ports:
+      - "19092:9092"
+
+  redpanda-receiver:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.10
+    container_name: redpanda-receiver
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --check=false
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda-receiver:9092
+    ports:
+      - "29092:9092"
+
+  core-service:
+    build:
+      context: .
+      dockerfile: core-service/Dockerfile
+    container_name: core-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/idempotency
+      SPRING_DATASOURCE_USERNAME: idempotency
+      SPRING_DATASOURCE_PASSWORD: idempotency
+      APP_ROUTES_FILE: /app/config/routes.yaml
+      APP_SECURITY_TOKENS_0_TOKEN: operator-token
+      APP_SECURITY_TOKENS_0_PRINCIPAL: operator
+      APP_SECURITY_TOKENS_0_ROLES_0: OPERATOR
+      APP_SECURITY_TOKENS_0_ROLES_1: ADMIN
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda-sender:
+        condition: service_started
+      redpanda-receiver:
+        condition: service_started
+    ports:
+      - "8080:8080"
+
+  sender-simulator:
+    build:
+      context: .
+      dockerfile: sender-simulator/Dockerfile
+    container_name: sender-simulator
+    environment:
+      APP_ROUTES_FILE: /app/config/routes.yaml
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      redpanda-sender:
+        condition: service_started
+      core-service:
+        condition: service_started
+    ports:
+      - "8081:8081"
+
+  receiver-simulator:
+    build:
+      context: .
+      dockerfile: receiver-simulator/Dockerfile
+    container_name: receiver-simulator
+    environment:
+      APP_ROUTES_FILE: /app/config/routes.yaml
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      redpanda-receiver:
+        condition: service_started
+      core-service:
+        condition: service_started
+    ports:
+      - "8082:8082"
+
+volumes:
+  postgres-data:

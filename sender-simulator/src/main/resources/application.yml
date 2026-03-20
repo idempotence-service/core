@@ -1,0 +1,9 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: sender-simulator
+
+app:
+  routes-file: config/routes.yaml
