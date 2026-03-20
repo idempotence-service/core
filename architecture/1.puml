@@ -21,7 +21,21 @@ note right of Sender #FFFFFF
 }
 end note
 
-IdemService -> IdemService: Валидация события и загрузка маршрута из YAML
+IdemService -> IdemService: Валидация события
+
+alt #tomato Отсутствует тело запроса / header [uid]
+    IdemService -> DB: EventAuditRepository.save(invalidEventAudit)
+    note right of DB #FFFFFF
+        event_audit.reason = "Некорректное входящее событие"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.yaml_snapshot = null
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
+    IdemService -> IdemService: Завершить процесс
+end
+
+IdemService -> IdemService: Загрузка маршрута из YAML
 note right of IdemService #FFFFFF
 routeSnapshot = {
   "service": "sender-service",
@@ -33,13 +47,13 @@ routeSnapshot = {
 }
 end note
 
-alt #tomato Отсутствует тело запроса / header [uid] / маршрут не найден
+alt #tomato Маршрут не найден
     IdemService -> DB: EventAuditRepository.save(invalidEventAudit)
     note right of DB #FFFFFF
-        event_audit.reason = "Некорректное входящее событие"
+        event_audit.reason = "Не найден маршрут для входящего события"
         event_audit.headers = [headers] из запроса
         event_audit.payload = [payload] из запроса
-        event_audit.yaml_snapshot = [routeSnapshot] или null
+        event_audit.yaml_snapshot = null
         event_audit.create_date = текущее время [UTC +3:00]
     end note
     IdemService -> IdemService: Завершить процесс
@@ -58,6 +72,11 @@ note right of DB #FFFFFF
 end note
 DB --> IdemService: Результат поиска
 
+IdemService -> IdemService: Взять [request_out] из routeSnapshot
+note right of IdemService #FFFFFF
+    request_out = [routeSnapshot.request_out]
+end note
+
 alt #tomato Запись найдена
     alt #tomato request_out существует в yaml_snapshot
        IdemService -> DB: KafkaEventOutboxRepository.save(duplicateResponse)
@@ -74,6 +93,17 @@ alt #tomato Запись найдена
           kafka_event_outbox.update_date = текущее время [UTC +3:00]
        end note
     end
+    IdemService -> DB: EventAuditRepository.save(idempotencyCheckFailedAudit)
+    note right of DB #FFFFFF
+        event_audit.global_key = [global_key]
+        event_audit.service_name = [routeSnapshot.service]
+        event_audit.integration_name = [routeSnapshot.integration]
+        event_audit.reason = "Событие не прошло проверку на идемпотентность"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.yaml_snapshot = [routeSnapshot]
+        event_audit.create_date = текущее время [UTC +3:00]
+    end note
     IdemService -> IdemService: Завершить процесс
 else #yellowgreen Запись не найдена
     alt #yellowgreen request_out существует в yaml_snapshot
@@ -105,6 +135,17 @@ else #yellowgreen Запись не найдена
        idempotency.payload = [payload] из запроса
        idempotency.headers = [headers] из запроса кроме "uid"
        idempotency.yaml_snapshot = [routeSnapshot]
+    end note
+    IdemService -> DB: EventAuditRepository.save(idempotencyCheckPassedAudit)
+    note right of DB #FFFFFF
+        event_audit.global_key = [global_key]
+        event_audit.service_name = [routeSnapshot.service]
+        event_audit.integration_name = [routeSnapshot.integration]
+        event_audit.reason = "Событие успешно прошло проверку на идемпотентность"
+        event_audit.headers = [headers] из запроса
+        event_audit.payload = [payload] из запроса
+        event_audit.yaml_snapshot = [routeSnapshot]
+        event_audit.create_date = текущее время [UTC +3:00]
     end note
     IdemService -> IdemService: Завершить процесс
 else #tomato Внутренняя ошибка
