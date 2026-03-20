@@ -24,4 +24,9 @@ hs_err_pid*
 replay_pid*
 
 # IDEA files
-.idea
+.idea/
+
+# Gradle
+.gradle/
+build/
+**/build/
