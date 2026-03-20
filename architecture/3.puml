@@ -9,14 +9,10 @@ participant "Система-получатель" as Receiver
 
 loop send_request_fixed_delay
 
-    IdemService -> DB : Найти idempotency
+    IdemService -> DB : IdempotencyRepository.lockNextReserved()
     note right of DB #FFFFFF
-        SELECT *
-        FROM idempotency
-        WHERE status = 'RESERVED'
-        ORDER BY create_date ASC
-        LIMIT 1
-        FOR UPDATE
+        Получить первую запись idempotency
+        со status = RESERVED
     end note
 
     DB --> IdemService : Результат поиска
@@ -26,11 +22,10 @@ loop send_request_fixed_delay
 
     else #yellowgreen Запись найдена
 
-        IdemService -> IdemService : Найти топик для отправки события [reply_in]
+        IdemService -> IdemService : Взять [reply_in] из idempotency.yaml_snapshot
 
         note right of IdemService #FFFFFF
-            Найти route по integration_flow + integration_operation
-            Получить [reply_in]
+            reply_in = [idempotency.yaml_snapshot.reply_in]
         end note
 
         alt reply_in существует
@@ -40,9 +35,10 @@ loop send_request_fixed_delay
                 Отправка события в [reply_in]
                 {
                   "headers": {
-                    "originalIdempotencyKey": "550e8400-e29b-41d4-a716-446655440000",
-                    "integrationFlow": "system1-to-system2",
-                    "integrationOperation": "save-new-value",
+                    "globalKey": "[idempotency.global_key]",
+                    "uid": "[idempotency.source_uid]",
+                    "service": "[idempotency.service_name]",
+                    "integration": "[idempotency.integration_name]",
                     [idempotency.headers]
                   },
                   "payload": {
@@ -54,14 +50,13 @@ loop send_request_fixed_delay
             Receiver --> IdemService : Получение ответа
 
             alt Событие успешно отправлено
-                IdemService -> IdemService : Найти топик получения ответа [reply_out]
+                IdemService -> IdemService : Взять [reply_out] из idempotency.yaml_snapshot
                 note right of IdemService #FFFFFF
-                    Найти route по integration_flow + integration_operation
-                    Получить reply_out
+                    reply_out = [idempotency.yaml_snapshot.reply_out]
                 end note
 
                 alt reply_out существует
-                    IdemService -> DB : Обновить idempotency
+                    IdemService -> DB : IdempotencyRepository.markWaitingAsyncResponse(operation)
                     note right of DB #FFFFFF
                         idempotency.status = WAITING_ASYNC_RESPONSE
                         idempotency.update_date = текущее время [UTC +3:00]
@@ -69,12 +64,13 @@ loop send_request_fixed_delay
                     IdemService -> IdemService : Завершить процесс
 
                 else reply_out не существует
-                    IdemService -> DB : Обновить idempotency
+                    IdemService -> DB : IdempotencyRepository.markCommitted(operation)
                     note right of DB #FFFFFF
                         idempotency.status = COMMITTED
                         idempotency.update_date = текущее время [UTC +3:00]
                     end note
                     IdemService -> IdemService : Завершить процесс
+                end
             else #tomato Ошибка отправки
                 alt Временная ошибка отправки
                     note right of IdemService #FFFFFF
@@ -89,11 +85,10 @@ loop send_request_fixed_delay
                     IdemService -> IdemService : Завершить процесс
 
                 else #tomato Иная ошибка отправки
-                    IdemService -> DB : Обновить idempotency
+                    IdemService -> DB : IdempotencyRepository.markError(operation)
                     note right of DB #FFFFFF
                         idempotency.status = ERROR
-                        idempotency.status_description = "Произошла ошибка при отправке ответа
-                                системе-получателю в топик [reply_in]: [java.exception]"
+                        idempotency.status_description = "Произошла ошибка при отправке события системе-получателю в [reply_in]: [java.exception]"
                         idempotency.update_date = текущее время [UTC +3:00]
                     end note
                     IdemService -> IdemService : Завершить процесс
@@ -102,26 +97,16 @@ loop send_request_fixed_delay
 
         else #tomato reply_in не существует
 
-            IdemService -> DB : Обновить idempotency
+            IdemService -> DB : IdempotencyRepository.markError(operation)
             note right of DB #FFFFFF
                 idempotency.status = ERROR
-                idempotency.status_description = "Не найден топик отправки события"
+                idempotency.status_description = "Не найден канал reply_in в сохранённом yaml_snapshot"
                 idempotency.update_date = текущее время [UTC +3:00]
             end note
 
             IdemService -> IdemService : Завершить процесс
         end
-    end
-else #tomato Внутренняя ошибка
-    alt Ошибка БД
-        IdemService -> IdemService : Завершить процесс
-    else
-        IdemService -> DB : Обновить idempotency
-        note right of DB #FFFFFF
-            idempotency.status = ERROR
-            idempotency.status_description = "Внутренняя ошибка: [java.exception.message]"
-            idempotency.update_date = текущее время [UTC +3:00]
-        end note
+    else #tomato Внутренняя ошибка
         IdemService -> IdemService : Завершить процесс
     end
 end

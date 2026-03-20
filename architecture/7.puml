@@ -14,9 +14,7 @@ Authorization: Bearer <token>
 
 Body:
 {
-  "idempotencyKey": "550e8400-e29b-41d4-a716-446655440000",
-  "integrationFlow": "system1-to-system2",
-  "integrationOperation": "save-new-tasks"
+  "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000"
 }
 end note
 
@@ -56,14 +54,10 @@ alt #tomato Отсутствует Authorization header
 end
 
 
-IdemService -> DB: Найти idempotency
+IdemService -> DB: IdempotencyRepository.findByGlobalKeyForUpdate(globalKey)
 note right of DB #FFFFFF
-    SELECT *
-    FROM idempotency
-    WHERE integration_flow = :integrationFlow
-      AND integration_operation = :integrationOperation
-      AND idempotency_key = :idempotencyKey
-    FOR UPDATE
+    Поиск записи idempotency по global_key
+    c блокировкой на обновление
 end note
 
 DB --> IdemService: Результат поиска
@@ -79,7 +73,7 @@ alt #tomato Запись не найдена
           "error": {
             "title": "Техническая ошибка",
             "code": "TECHNICAL_ERROR_02",
-            "text": "Задача с данными [idempotencyKey], [integrationFlow], [integrationOperation] не найдена"
+            "text": "Задача с данными [globalKey] не найдена"
           }
         }
     end note
@@ -99,9 +93,9 @@ else #yellowgreen Запись найдена
         end note
         IdemService -> IdemService: Завершить процесс
     else idempotency.status == ERROR
-        IdemService -> DB: Обновить idempotency
+        IdemService -> DB: IdempotencyRepository.markReserved(operation)
         note right of DB #FFFFFF
-            idempotency.status = 'RESERVED'
+            idempotency.status = RESERVED
             idempotency.update_date = текущее время [UTC +3:00]
         end note
 

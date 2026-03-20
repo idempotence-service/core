@@ -1,5 +1,5 @@
 @startuml
-title Получение события по уникальному ключу (UK)
+title Получение события по global_key
 
 autonumber
 
@@ -13,9 +13,7 @@ Headers:
 Authorization: Bearer <token>
 
 Query params:
-idempotencyKey
-integrationFlow
-integrationOperation
+globalKey
 end note
 
 
@@ -57,22 +55,9 @@ alt #tomato Отсутствует Authorization header
 end
 
 
-IdemService -> DB: Найти idempotency
+IdemService -> DB: IdempotencyRepository.findByGlobalKey(globalKey)
 note right of DB #FFFFFF
-SELECT
-    idempotency_key,
-    integration_flow,
-    integration_operation,
-    status,
-    status_description,
-    create_date,
-    update_date,
-    payload,
-    headers
-FROM idempotency
-WHERE integration_flow = :integrationFlow
-  AND integration_operation = :integrationOperation
-  AND idempotency_key = :idempotencyKey
+    Поиск записи idempotency по global_key
 end note
 
 
@@ -89,7 +74,7 @@ alt #tomato Запись не найдена
           "error": {
             "title": "Техническая ошибка",
             "code": "TECHNICAL_ERROR_02",
-            "text": "Событие с данными [idempotencyKey], [integrationFlow], [integrationOperation] не найдено"
+            "text": "Событие с данными [globalKey] не найдено"
           }
         }
     end note
@@ -104,9 +89,10 @@ else #yellowgreen Запись найдена
         {
           "success": true,
           "data": {
-            "idempotencyKey": "550e8400-e29b-41d4-a716-446655440000",
-            "integrationFlow": "system1-to-system2",
-            "integrationOperation": "save-new-tasks",
+            "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000",
+            "sourceUid": "550e8400-e29b-41d4-a716-446655440000",
+            "service": "sender-service",
+            "integration": "system1-to-system2",
             "status": "ERROR",
             "statusDescription": "Ошибка обработки события",
             "createDate": "2026-03-15T10:15:30",
