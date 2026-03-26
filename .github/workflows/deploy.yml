@@ -1,0 +1,34 @@
+name: deploy-main-to-server
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker-compose.yml'
+      - '.env.example'
+      - 'scripts/**'
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run deploy on server over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH }}
+            chmod +x scripts/compose-up.sh scripts/deploy-main.sh scripts/deploy.sh up.sh down.sh
+            DEPLOY_BRANCH=main ./scripts/deploy-main.sh

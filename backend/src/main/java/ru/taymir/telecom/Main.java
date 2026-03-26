@@ -12,8 +12,8 @@ import java.util.concurrent.Executors;
 
 public class Main {
 
-    static void main(String[] args) throws IOException {
-        int port = 8080;
+    public static void main(String[] args) throws IOException {
+        int port = readPort();
 
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
 
@@ -25,10 +25,19 @@ public class Main {
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         server.start();
 
-        System.out.println("Server started on http://localhost:" + port);
+        System.out.println("Server started on http://0.0.0.0:" + port);
         System.out.println("Endpoints:");
         System.out.println("  GET /");
         System.out.println("  GET /health");
+    }
+
+    private static int readPort() {
+        String rawPort = System.getenv().getOrDefault("SERVER_PORT", "8080");
+        try {
+            return Integer.parseInt(rawPort);
+        } catch (NumberFormatException ex) {
+            throw new IllegalStateException("SERVER_PORT must be a valid integer, got: " + rawPort, ex);
+        }
     }
 
     static class RootController implements HttpHandler {
@@ -39,7 +48,7 @@ public class Main {
                 return;
             }
 
-            String response = "Hello from Java 25 server!";
+            String response = "Hello from Java backend!";
             sendResponse(exchange, 200, response, "text/plain; charset=UTF-8");
         }
     }
@@ -49,6 +58,7 @@ public class Main {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 
         exchange.getResponseHeaders().set("Content-Type", contentType);
+        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.sendResponseHeaders(statusCode, bytes.length);
 
         try (OutputStream os = exchange.getResponseBody()) {
