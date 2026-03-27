@@ -1,0 +1,129 @@
+@startuml
+title Получение события по global_key
+
+autonumber
+
+participant "UI" as UI
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+
+UI -> IdemService: GET /get-event-by-id
+note right of UI #FFFFFF
+Headers:
+Authorization: Bearer <token>
+
+Query params:
+globalKey
+end note
+
+
+IdemService -> IdemService: Валидация запроса
+
+alt #tomato Ошибка валидации запроса
+    IdemService -> UI: 400 BAD_REQUEST
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "errorUid": "[generated]",
+            "code": "Некорректный входящий запрос",
+            "text": "[java.exception]"
+          }
+        }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+end
+
+
+alt #tomato Отсутствует Authorization header
+    IdemService -> UI: 200 OK
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "title": "Техническая ошибка",
+            "code": "TECHNICAL_ERROR_01",
+            "text": "Нет доступа"
+          }
+        }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+end
+
+
+IdemService -> DB: IdempotencyRepository.findByGlobalKey(globalKey)
+note right of DB #FFFFFF
+    Поиск записи idempotency по global_key
+end note
+
+
+DB --> IdemService: Результат поиска
+
+
+alt #tomato Запись не найдена
+
+    IdemService -> UI: 500 INTERNAL_SERVER_ERROR
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "title": "Техническая ошибка",
+            "code": "TECHNICAL_ERROR_02",
+            "text": "Событие с данными [globalKey] не найдено"
+          }
+        }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+
+
+else #yellowgreen Запись найдена
+
+    IdemService -> UI: 200 OK
+    note right of UI #FFFFFF
+        {
+          "success": true,
+          "data": {
+            "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000",
+            "sourceUid": "550e8400-e29b-41d4-a716-446655440000",
+            "service": "sender-service",
+            "integration": "system1-to-system2",
+            "status": "ERROR",
+            "statusDescription": "Ошибка обработки события",
+            "createDate": "2026-03-15T10:15:30",
+            "updateDate": "2026-03-15T10:20:12",
+            "payload": {...},
+            "headers": {...}
+          },
+          "error": {}
+        }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+
+
+else #tomato Внутренняя ошибка
+
+    IdemService -> UI: 500 INTERNAL_SERVER_ERROR
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "title": "Техническая ошибка",
+            "code": [error.code],
+            "text": [java.exception]
+          }
+        }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+
+end
+
+@enduml

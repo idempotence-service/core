@@ -1,0 +1,130 @@
+@startuml
+title Перезапуск задачи на ручном разборе
+
+autonumber
+
+participant "UI" as UI
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+
+UI -> IdemService: POST /restart-event
+note right of UI #FFFFFF
+Headers:
+Authorization: Bearer <token>
+
+Body:
+{
+  "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000"
+}
+end note
+
+IdemService -> IdemService: Валидация запроса
+
+alt #tomato Ошибка валидации запроса
+    IdemService -> UI: 400 BAD_REQUEST
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "errorUid": "[generated]",
+            "code": "Некорректный входящий запрос",
+            "text": "[java.exception]"
+          }
+        }
+    end note
+    IdemService -> IdemService: Завершить процесс
+end
+
+alt #tomato Отсутствует Authorization header
+    IdemService -> UI: 200 OK
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "title": "Техническая ошибка",
+            "code": "TECHNICAL_ERROR_01",
+            "text": "Нет доступа"
+          }
+        }
+    end note
+    IdemService -> IdemService: Завершить процесс
+
+end
+
+
+IdemService -> DB: IdempotencyRepository.findByGlobalKeyForUpdate(globalKey)
+note right of DB #FFFFFF
+    Поиск записи idempotency по global_key
+    c блокировкой на обновление
+end note
+
+DB --> IdemService: Результат поиска
+
+
+alt #tomato Запись не найдена
+
+    IdemService -> UI: 500 INTERNAL_SERVER_ERROR
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "title": "Техническая ошибка",
+            "code": "TECHNICAL_ERROR_02",
+            "text": "Задача с данными [globalKey] не найдена"
+          }
+        }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+
+
+else #yellowgreen Запись найдена
+    alt idempotency.status != ERROR
+        IdemService -> UI: 200 OK
+        note right of UI #FFFFFF
+            {
+              "success": true,
+              "data": "Задача уже перезапущена",
+              "error": {}
+            }
+        end note
+        IdemService -> IdemService: Завершить процесс
+    else idempotency.status == ERROR
+        IdemService -> DB: IdempotencyRepository.markReserved(operation)
+        note right of DB #FFFFFF
+            idempotency.status = RESERVED
+            idempotency.update_date = текущее время [UTC +3:00]
+        end note
+
+        IdemService -> UI: 200 OK
+        note right of UI #FFFFFF
+            {
+              "success": true,
+              "data": "Задача успешно перезапущена",
+              "error": {}
+            }
+        end note
+        IdemService -> IdemService: Завершить процесс
+    end
+
+else #tomato Внутренняя ошибка
+    IdemService -> UI: 500 INTERNAL_SERVER_ERROR
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "title": "Техническая ошибка",
+            "code": [error.code],
+            "text": "[java.exception]"
+          }
+        }
+    end note
+    IdemService -> IdemService: Завершить процесс
+
+end
+
+@enduml

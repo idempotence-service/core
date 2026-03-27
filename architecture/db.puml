@@ -1,0 +1,91 @@
+@startuml
+title Модель данных idempotency_service
+
+skinparam defaultFontName Monospaced
+skinparam linetype ortho
+skinparam padding 5
+skinparam entityPadding 10
+
+entity "idempotency" {
+  + global_key         : varchar(512) <<UK>> NOT NULL
+  --
+  source_uid           : varchar(255) NOT NULL
+  service_name         : varchar(255) NOT NULL
+  integration_name     : varchar(255) NOT NULL
+  yaml_snapshot        : jsonb NOT NULL
+  headers              : jsonb NOT NULL
+  payload              : jsonb NOT NULL
+  status               : varchar(24) NOT NULL
+  status_description   : varchar(255)
+  create_date          : timestamptz
+  update_date          : timestamptz
+}
+
+entity "kafka_event_outbox" {
+  + id                 : bigint <<PK>>
+  --
+  global_key           : varchar(512)
+  service_name         : varchar(255)
+  integration_name     : varchar(255)
+  yaml_snapshot        : jsonb NOT NULL
+  status               : varchar(8) NOT NULL
+  status_description   : varchar(255)
+  result               : varchar(8) NOT NULL
+  result_description   : varchar(255)
+  create_date          : timestamptz
+  update_date          : timestamptz
+}
+
+entity "event_audit" {
+  + id                 : bigint <<PK>>
+  --
+  global_key           : varchar(512)
+  service_name         : varchar(255)
+  integration_name     : varchar(255)
+  reason               : varchar(255) NOT NULL
+  headers              : jsonb
+  payload              : jsonb
+  yaml_snapshot        : jsonb
+  create_date          : timestamptz
+}
+
+note right of idempotency
+Уникальность:
+global_key
+
+global_key = service_name + ":" + integration_name + ":" + source_uid
+source_uid - uid из входящего события
+service_name - сервис из сохранённого YAML-снапшота
+integration_name - интеграция из сохранённого YAML-снапшота
+yaml_snapshot - снапшот route-конфигурации с inbound / request_out / reply_in / reply_out
+payload - тело запроса
+headers - заголовки запроса без uid
+status - RESERVED / COMMITTED / ERROR / WAITING_ASYNC_RESPONSE
+status_description - описание статуса
+create_date - время создания
+update_date - время обновления
+end note
+
+note right of kafka_event_outbox
+global_key - ссылка на исходную операцию
+yaml_snapshot - сохранённый снапшот route-конфигурации
+result - результат обработки события - SUCCESS / FAIL
+result_description - описание результата обработки события
+status - NEW / DONE / ERROR
+status_description - описание статуса
+create_date - время создания
+update_date - время обновления
+end note
+
+note right of event_audit
+Хранит невалидные входящие события и ответы,
+которые нельзя обработать штатным образом.
+
+global_key может быть null,
+если ключ не удалось вычислить.
+reason - причина аудита
+yaml_snapshot - снапшот YAML на момент получения события,
+если маршрут был найден
+end note
+
+@enduml

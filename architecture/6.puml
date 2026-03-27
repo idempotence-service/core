@@ -1,0 +1,153 @@
+@startuml
+title Предоставление задач на ручной разбор
+
+autonumber
+
+participant "UI" as UI
+participant "idempotency_service" as IdemService
+database "База данных" as DB
+
+UI -> IdemService: GET /get-error-events?limit=100&sort=asc
+note right of UI #FFFFFF
+Headers:
+Authorization: Bearer <token>
+
+Body: отсутствует
+end note
+
+IdemService -> IdemService: Валидация запроса
+alt #tomato Ошибка валидации запроса
+    IdemService -> UI: 400 BAD_REQUEST
+    note right of UI #FFFFFF
+        {
+          "success": false,
+          "data": null,
+          "error": {
+            "errorUid": "[generated]",
+            "code": "Некорректный входящий запрос",
+            "text": "[java.exception]"
+          }
+        }
+    end note
+    IdemService -> IdemService: Завершить процесс
+end
+
+alt #tomato Отсутствует Authorization header
+    IdemService -> UI: 200 OK
+    note right of UI #FFFFFF
+    {
+        "success": false,
+        "data": null,
+        "error": {
+            "title": "Техническая ошибка",
+            "code": "TECHNICAL_ERROR_01",
+            "text": "Нет доступа"
+        }
+    }
+    end note
+    IdemService -> IdemService: Завершить процесс
+end
+
+IdemService -> DB: IdempotencyRepository.findErrorEvents(pageRequest)
+note right of DB #FFFFFF
+    Получить записи idempotency со status = ERROR
+    с пагинацией и сортировкой по create_date
+end note
+
+DB --> IdemService: Результат поиска
+
+alt #yellowgreen Записи не найдены
+
+    IdemService -> UI: 200 OK. Вернуть пустой список
+    note right of UI #FFFFFF
+    {
+    "content": [],
+    "pageable": {
+        "sort": {
+          "sorted": false,
+          "unsorted": true,
+          "empty": true
+        },
+        "pageNumber": 0,
+        "pageSize": 0,
+        "offset": 0,
+        "paged": true,
+        "unpaged": false
+      },
+      "last": true,
+      "totalElements": 0,
+      "totalPages": 1,
+      "first": true,
+      "numberOfElements": 0,
+      "size": 0,
+      "number": 0,
+      "sort": {
+        "sorted": false,
+        "unsorted": true,
+        "empty": true
+      },
+      "empty": true
+    }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+
+else #yellowgreen Записи найдены
+
+    IdemService -> UI: 200 OK. Вернуть список событий
+    note right of UI #FFFFFF
+    {
+      "content": [
+        {
+            "status": "ERROR",
+            "globalKey": "sender-service:system1-to-system2:550e8400-e29b-41d4-a716-446655440000",
+            "service": "sender-service",
+            "integration": "system1-to-system2"
+        }
+      ],
+      "pageable": {
+        "sort": {
+          "sorted": false,
+          "unsorted": true,
+          "empty": true
+        },
+        "pageNumber": 0,
+        "pageSize": 20,
+        "offset": 0,
+        "paged": true,
+        "unpaged": false
+      },
+      "last": true,
+      "totalElements": N,
+      "totalPages": 1,
+      "first": true,
+      "numberOfElements": N,
+      "size": 20,
+      "number": 0,
+      "sort": {
+        "sorted": false,
+        "unsorted": true,
+        "empty": true
+      },
+      "empty": false
+    }
+    end note
+
+    IdemService -> IdemService: Завершить процесс
+else #tomato Внутренняя ошибка
+    IdemService -> UI: 500 Internal Server Error
+        note right of UI #FFFFFF
+        {
+            "success": false,
+            "data": null,
+            "error": {
+                "title": "Техническая ошибка",
+                "code": [error.code],
+                "text": [java.exception]
+            }
+        }
+        end note
+        IdemService -> IdemService: Завершить процесс
+end
+
+@enduml
