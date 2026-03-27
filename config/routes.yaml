@@ -1,0 +1,24 @@
+service:
+  name: sender-service
+
+kafka:
+  routes:
+    system1-to-system2:
+      sender:
+        producer:
+          host: redpanda-sender:9092
+          topic: sender.events.inbound
+        consumer:
+          host: redpanda-sender:9092
+          topic: sender.events.request-out
+          group: sender-simulator-replies
+      receiver:
+        producer:
+          host: redpanda-receiver:9092
+          topic: receiver.events.unique
+        consumer:
+          host: redpanda-receiver:9092
+          topic: receiver.events.reply
+          group: core-reply-consumer
+      idempotency:
+        enabled: true
