@@ -1,0 +1,6 @@
+rootProject.name = 'core'
+
+include 'common'
+include 'core-service'
+include 'sender-simulator'
+include 'receiver-simulator'

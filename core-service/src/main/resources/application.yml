@@ -1,0 +1,45 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: core-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/idempotency
+    username: idempotency
+    password: idempotency
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+app:
+  routes-file: config/routes.yaml
+  scheduler:
+    outbox-fixed-delay: 5s
+    delivery-fixed-delay: 5s
+    cleanup-fixed-delay: 1d
+    batch-size: 100
+  cleanup:
+    retention: 7d
+    batch-size: 500
+  security:
+    tokens:
+      - token: operator-token
+        principal: operator
+        roles:
+          - OPERATOR
+          - ADMIN
